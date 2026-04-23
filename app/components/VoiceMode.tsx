@@ -1,216 +1,163 @@
-"use client";
+'use client';
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import CrisisBanner from "./CrisisBanner";
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
+import { ArrowLeft, Mic, MicOff } from 'lucide-react';
+import CrisisBanner from './CrisisBanner';
+import AlivioMark from './AlivioMark';
 
-type Message = { role: "user" | "assistant"; content: string };
+interface Props {
+  onExit: () => void;
+}
 
-type Props = {
-  onBack: () => void;
-};
+type Status = 'idle' | 'listening' | 'thinking' | 'speaking' | 'error';
 
-type SpeechRecognitionLike = {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  onresult: ((event: any) => void) | null;
-  onend: (() => void) | null;
-  onerror: ((event: any) => void) | null;
-  start: () => void;
-  stop: () => void;
-  abort: () => void;
-};
+const SESSION_ID_KEY = 'alivio_session_id';
 
-export default function VoiceMode({ onBack }: Props) {
-  const [supported, setSupported] = useState(true);
-  const [status, setStatus] = useState<
-    "idle" | "listening" | "thinking" | "speaking"
-  >("idle");
-  const [transcript, setTranscript] = useState("");
-  const [lastReply, setLastReply] = useState("");
-  const [crisisDetected, setCrisisDetected] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+function stripMarkers(text: string): { clean: string; crisis: boolean } {
+  const crisis = /\[CRISIS_DETECTADA\]/.test(text);
+  const clean = text
+    .replace(/\[(CRISIS_DETECTADA|MOSTRAR_DIRECTORIO|INICIAR_RESPIRACION:[^\]]+|INICIAR_GROUNDING:[^\]]+|NOTIFICAR_TERAPEUTA_URGENTE|FIN_SESION_RESUMIR)\]/g, '')
+    .trim();
+  return { clean, crisis };
+}
 
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
-  const messagesRef = useRef<Message[]>([]);
-  const activeRef = useRef(true);
+export default function VoiceMode({ onExit }: Props) {
+  const [status, setStatus] = useState<Status>('idle');
+  const [transcript, setTranscript] = useState('');
+  const [aliviosResponse, setAliviosResponse] = useState('');
+  const [crisisVisible, setCrisisVisible] = useState(false);
+  const [supported, setSupported] = useState<boolean | null>(null);
 
-  const speak = useCallback((text: string): Promise<void> => {
-    return new Promise((resolve) => {
-      if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-        resolve();
-        return;
-      }
-      const utter = new SpeechSynthesisUtterance(text);
-      const voices = window.speechSynthesis.getVoices();
-      const preferred =
-        voices.find((v) => v.lang === "es-MX") ||
-        voices.find((v) => v.lang === "es-ES") ||
-        voices.find((v) => v.lang.startsWith("es"));
-      if (preferred) utter.voice = preferred;
-      utter.lang = preferred?.lang || "es-MX";
-      utter.pitch = 1;
-      utter.rate = 0.9;
-      utter.onend = () => resolve();
-      utter.onerror = () => resolve();
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utter);
-    });
+  const recognitionRef = useRef<any>(null);
+  const sessionIdRef = useRef<string>('');
+  const historyRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+
+  useEffect(() => {
+    let sid = typeof window !== 'undefined' ? localStorage.getItem(SESSION_ID_KEY) : null;
+    if (!sid) {
+      sid = crypto.randomUUID();
+      localStorage.setItem(SESSION_ID_KEY, sid);
+    }
+    sessionIdRef.current = sid;
+
+    const SpeechRecognition =
+      typeof window !== 'undefined'
+        ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+        : null;
+    setSupported(Boolean(SpeechRecognition));
   }, []);
 
-  const sendToServer = useCallback(
-    async (userText: string) => {
-      setStatus("thinking");
-      const newMessages: Message[] = [
-        ...messagesRef.current,
-        { role: "user", content: userText },
-      ];
-      messagesRef.current = newMessages;
+  const speak = useCallback((text: string) => {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'es-MX';
+    utter.rate = 0.92;
+    utter.pitch = 1.0;
+    const voices = window.speechSynthesis.getVoices();
+    const preferred =
+      voices.find((v) => /es-(MX|419|US|ES)/i.test(v.lang) && /female|woman|mujer/i.test(v.name)) ||
+      voices.find((v) => /es-(MX|419|US|ES)/i.test(v.lang));
+    if (preferred) utter.voice = preferred;
+    utter.onstart = () => setStatus('speaking');
+    utter.onend = () => setStatus('idle');
+    window.speechSynthesis.speak(utter);
+  }, []);
+
+  const handleUserMessage = useCallback(
+    async (text: string) => {
+      if (!text.trim()) return;
+      historyRef.current.push({ role: 'user', content: text.trim() });
+      setStatus('thinking');
 
       try {
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: newMessages }),
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: historyRef.current,
+            sessionId: sessionIdRef.current,
+            session: {
+              alivioConectado: false,
+              modo: 'voz',
+              zonaHoraria: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            },
+          }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Error del servidor");
 
-        if (data.crisisDetected) setCrisisDetected(true);
-
-        const reply = data.reply as string;
-        messagesRef.current = [
-          ...newMessages,
-          { role: "assistant", content: reply },
-        ];
-        setLastReply(reply);
-        setStatus("speaking");
-        await speak(reply);
-      } catch (err) {
-        const msg =
-          err instanceof Error ? err.message : "Error al procesar la voz.";
-        setError(msg);
-      } finally {
-        if (activeRef.current) {
-          setStatus("listening");
-          startListening();
+        let responseText = '';
+        const contentType = res.headers.get('Content-Type') ?? '';
+        if (contentType.includes('application/json')) {
+          const data = await res.json();
+          responseText = data.content ?? '';
+        } else if (res.body) {
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            responseText += decoder.decode(value, { stream: true });
+          }
         }
+
+        const { clean, crisis } = stripMarkers(responseText);
+        if (crisis) setCrisisVisible(true);
+        historyRef.current.push({ role: 'assistant', content: clean });
+        setAliviosResponse(clean);
+        speak(clean);
+      } catch (err) {
+        setStatus('error');
+        setAliviosResponse('Perdona, tuve un problema. Intenta de nuevo.');
+        speak('Perdona, tuve un problema. Intenta de nuevo.');
       }
     },
     [speak]
   );
 
   const startListening = useCallback(() => {
-    const rec = recognitionRef.current;
-    if (!rec) return;
-    try {
-      setTranscript("");
-      rec.start();
-      setStatus("listening");
-    } catch {
-      /* ya está escuchando */
-    }
-  }, []);
-
-  useEffect(() => {
-    activeRef.current = true;
-
-    const AnyWindow = window as any;
+    if (!supported) return;
     const SpeechRecognition =
-      AnyWindow.SpeechRecognition || AnyWindow.webkitSpeechRecognition;
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'es-MX';
+    recognition.interimResults = true;
+    recognition.continuous = false;
 
-    if (!SpeechRecognition) {
-      setSupported(false);
-      return;
-    }
-
-    const rec: SpeechRecognitionLike = new SpeechRecognition();
-    rec.lang = "es-MX";
-    rec.continuous = false;
-    rec.interimResults = true;
-
-    let finalText = "";
-
-    rec.onresult = (event: any) => {
-      let interim = "";
-      finalText = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i];
-        if (result.isFinal) {
-          finalText += result[0].transcript;
-        } else {
-          interim += result[0].transcript;
-        }
-      }
-      setTranscript(finalText || interim);
+    recognition.onstart = () => {
+      setStatus('listening');
+      setTranscript('');
+    };
+    recognition.onresult = (e: any) => {
+      const text = Array.from(e.results)
+        .map((r: any) => r[0].transcript)
+        .join('');
+      setTranscript(text);
+    };
+    recognition.onerror = () => setStatus('error');
+    recognition.onend = () => {
+      const finalText = transcript || (recognition as any)._lastFinal || '';
+      if (finalText.trim()) handleUserMessage(finalText.trim());
+      else setStatus('idle');
     };
 
-    rec.onerror = (event: any) => {
-      if (event?.error === "no-speech" || event?.error === "aborted") return;
-      setError(`Error de reconocimiento: ${event?.error || "desconocido"}`);
-    };
+    recognitionRef.current = recognition;
+    recognition.start();
+  }, [supported, transcript, handleUserMessage]);
 
-    rec.onend = () => {
-      const text = finalText.trim();
-      if (text && activeRef.current) {
-        sendToServer(text);
-      } else if (activeRef.current && status === "listening") {
-        try {
-          rec.start();
-        } catch {
-          /* ignore */
-        }
-      }
-    };
-
-    recognitionRef.current = rec;
-
-    // Cargar voces (algunos navegadores las cargan async)
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.getVoices();
-    }
-
-    startListening();
-
-    return () => {
-      activeRef.current = false;
-      try {
-        rec.abort();
-      } catch {
-        /* ignore */
-      }
-      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const stopListening = useCallback(() => {
+    recognitionRef.current?.stop();
   }, []);
 
-  const handleBack = () => {
-    activeRef.current = false;
-    try {
-      recognitionRef.current?.abort();
-    } catch {
-      /* ignore */
-    }
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-    }
-    onBack();
-  };
-
-  if (!supported) {
+  if (supported === false) {
     return (
-      <main className="min-h-screen flex flex-col items-center justify-center px-6 bg-gradient-to-b from-alivio-sky to-white dark:from-alivio-dark dark:to-slate-900 transition-colors duration-300">
-        <div className="max-w-md text-center bg-white dark:bg-white/10 rounded-3xl p-8 shadow-soft">
-          <p className="text-lg text-slate-800 dark:text-white mb-6">
-            Tu navegador no soporta voz. Usa Chrome o prueba el modo texto.
+      <main className="min-h-[100dvh] flex items-center justify-center p-6 bg-warm-bg">
+        <div className="max-w-md text-center space-y-4">
+          <p className="text-sage-900">
+            El modo voz necesita Chrome, Edge o Brave en tu navegador.
           </p>
-          <button
-            onClick={onBack}
-            className="bg-alivio-sky hover:bg-sky-300 text-slate-800 font-medium py-3 px-6 rounded-3xl shadow-soft transition-all duration-300"
-          >
-            ← Volver
+          <button onClick={onExit} className="btn-secondary-soft">
+            Usar modo texto
           </button>
         </div>
       </main>
@@ -218,78 +165,128 @@ export default function VoiceMode({ onBack }: Props) {
   }
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-between px-6 py-10 bg-gradient-to-b from-alivio-sky via-white to-alivio-mint dark:from-alivio-dark dark:via-slate-900 dark:to-slate-800 transition-colors duration-300">
-      <header className="w-full max-w-md flex items-center justify-between">
+    <div className="aurora-bg min-h-[100dvh] flex flex-col bg-warm-bg">
+      <CrisisBanner visible={crisisVisible} onDismiss={() => setCrisisVisible(false)} />
+
+      <header className="flex items-center gap-3 p-4 border-b border-sage-100/60 bg-white/60 backdrop-blur-md">
         <button
-          onClick={handleBack}
-          className="text-slate-700 dark:text-white font-medium px-4 py-2 rounded-full hover:bg-white/50 dark:hover:bg-white/10 transition-colors duration-300"
+          onClick={() => {
+            window.speechSynthesis?.cancel();
+            onExit();
+          }}
+          aria-label="Volver"
+          className="p-2 rounded-full hover:bg-sage-100 transition-colors"
         >
-          ← Volver
+          <ArrowLeft className="w-5 h-5 text-sage-700" />
         </button>
-        <span className="text-sm text-slate-600 dark:text-slate-300">
-          {status === "listening" && "Escuchando…"}
-          {status === "thinking" && "Pensando…"}
-          {status === "speaking" && "Hablando…"}
-          {status === "idle" && "Preparando…"}
-        </span>
+        <AlivioMark size={28} />
+        <span className="font-serif text-lg text-sage-900 -ml-1">Alivio</span>
       </header>
 
-      <div className="flex-1 flex flex-col items-center justify-center w-full max-w-md">
-        {crisisDetected && (
-          <div className="w-full mb-6">
-            <CrisisBanner />
-          </div>
-        )}
+      <div className="flex-1 flex flex-col items-center justify-center p-8 space-y-12">
+        <div className="relative flex items-center justify-center w-64 h-64">
+          {/* Halo glow ambient (respira siempre) */}
+          <motion.div
+            className="absolute w-64 h-64 rounded-full bg-sage-300/30 blur-3xl"
+            animate={{ opacity: [0.45, 0.85, 0.45] }}
+            transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+            aria-hidden
+          />
 
-        <div className="relative w-48 h-48 flex items-center justify-center mb-8">
-          {status === "listening" && (
+          {/* Ondas de sonido emanando — solo cuando hay actividad de voz */}
+          {(status === 'listening' || status === 'speaking') && (
             <>
-              <span className="absolute inset-0 rounded-full bg-alivio-sky/60 dark:bg-alivio-mint/40 animate-pulseRing" />
-              <span
-                className="absolute inset-0 rounded-full bg-alivio-sky/40 dark:bg-alivio-mint/30 animate-pulseRing"
-                style={{ animationDelay: "0.4s" }}
-              />
+              {[0, 0.7, 1.4].map((delay) => (
+                <motion.div
+                  key={delay}
+                  className="absolute rounded-full border border-sage-400/60"
+                  style={{ width: 128, height: 128 }}
+                  initial={{ scale: 0.95, opacity: 0.8 }}
+                  animate={{ scale: 2.6, opacity: 0 }}
+                  transition={{
+                    duration: 2.1,
+                    repeat: Infinity,
+                    delay,
+                    ease: 'easeOut',
+                  }}
+                  aria-hidden
+                />
+              ))}
             </>
           )}
-          {status === "speaking" && (
-            <>
-              <span className="absolute inset-4 rounded-full bg-alivio-mint/60 dark:bg-alivio-sky/40 animate-wave" />
-              <span
-                className="absolute inset-8 rounded-full bg-alivio-mint/40 dark:bg-alivio-sky/30 animate-wave"
-                style={{ animationDelay: "0.3s" }}
-              />
-            </>
-          )}
-          <div className="relative w-32 h-32 rounded-full bg-white dark:bg-white/10 shadow-soft flex items-center justify-center text-5xl">
-            {status === "speaking" ? "💬" : "🎙️"}
-          </div>
+
+          {/* Gota central — más chica en idle, crece al hablar */}
+          <motion.div
+            animate={{
+              scale:
+                status === 'listening'
+                  ? [1, 1.22, 1.04, 1.2, 1]
+                  : status === 'speaking'
+                    ? [1, 1.15, 1.05, 1.17, 1]
+                    : [1, 1.04, 1],
+            }}
+            transition={{
+              duration:
+                status === 'listening' ? 1.4 : status === 'speaking' ? 2.2 : 4,
+              repeat: Infinity,
+              ease: 'easeInOut',
+            }}
+            className="relative z-10 drop-shadow-[0_16px_32px_rgba(94,159,128,0.4)]"
+          >
+            <AlivioMark size={128} />
+          </motion.div>
         </div>
 
-        <div className="w-full min-h-[120px] text-center">
+        <div className="text-center max-w-md space-y-4 min-h-[120px]">
+          {status === 'listening' && (
+            <p className="text-[10px] tracking-[0.25em] uppercase text-sage-700/80">
+              Te escucho…
+            </p>
+          )}
           {transcript && (
-            <p className="text-slate-600 dark:text-slate-200 italic mb-3">
-              "{transcript}"
+            <p className="text-sage-900 text-base font-serif italic leading-relaxed">
+              &ldquo;{transcript}&rdquo;
             </p>
           )}
-          {lastReply && (
-            <p className="text-slate-800 dark:text-white leading-relaxed">
-              {lastReply}
+          {status === 'thinking' && (
+            <p className="text-[10px] tracking-[0.25em] uppercase text-sage-600/80 animate-pulse">
+              Pensando…
             </p>
           )}
-          {error && (
-            <p className="text-red-600 dark:text-red-300 text-sm mt-3">
-              {error}
-            </p>
+          {aliviosResponse && status !== 'listening' && (
+            <motion.p
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-sage-900 text-base leading-relaxed"
+            >
+              {aliviosResponse}
+            </motion.p>
           )}
         </div>
-      </div>
 
-      <button
-        onClick={handleBack}
-        className="w-full max-w-md bg-white dark:bg-white/10 text-slate-800 dark:text-white font-medium py-4 px-6 rounded-3xl shadow-soft hover:scale-[1.02] transition-transform duration-300"
-      >
-        Terminar conversación
-      </button>
-    </main>
+        <motion.button
+          whileTap={{ scale: 0.95 }}
+          onClick={status === 'listening' ? stopListening : startListening}
+          disabled={status === 'thinking' || status === 'speaking'}
+          className={`w-20 h-20 rounded-full flex items-center justify-center text-white transition-all disabled:opacity-50 shadow-lg ${
+            status === 'listening'
+              ? 'bg-rose-400 hover:bg-rose-500'
+              : 'bg-sage-500 hover:bg-sage-600'
+          }`}
+        >
+          {status === 'listening' ? (
+            <MicOff className="w-8 h-8" strokeWidth={2} />
+          ) : (
+            <Mic className="w-8 h-8" strokeWidth={2} />
+          )}
+        </motion.button>
+
+        <p className="text-[10px] tracking-[0.22em] uppercase text-sage-600/70 text-center max-w-xs">
+          {status === 'listening'
+            ? 'Toca el micrófono cuando termines'
+            : 'Toca el micrófono y cuéntame cómo te sientes'}
+        </p>
+      </div>
+    </div>
   );
 }

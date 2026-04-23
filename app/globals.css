@@ -2,44 +2,112 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  color-scheme: light dark;
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-warm-bg text-sage-900 antialiased;
+    font-feature-settings: 'ss01', 'cv11', 'ss02';
+  }
+
+  /* Noise/grain sutil para que no se sienta plástico */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    opacity: 0.035;
+    mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='1'/></svg>");
+  }
 }
 
-html,
-body {
-  height: 100%;
+@layer components {
+  .glass-card {
+    @apply bg-white/70 backdrop-blur-xl border border-white/60 shadow-[0_8px_32px_rgba(47,80,66,0.06)];
+  }
+
+  .btn-primary-soft {
+    @apply bg-sage-500 hover:bg-sage-600 text-white rounded-2xl
+           px-8 py-6 font-medium transition-all
+           shadow-[0_4px_20px_rgba(94,159,128,0.25)] hover:shadow-[0_8px_28px_rgba(94,159,128,0.35)]
+           active:scale-[0.98];
+  }
+
+  .btn-secondary-soft {
+    @apply bg-white hover:bg-sage-50 text-sage-800 border border-sage-200 rounded-2xl
+           px-8 py-6 font-medium transition-all
+           shadow-[0_2px_10px_rgba(47,80,66,0.04)] hover:shadow-[0_4px_18px_rgba(47,80,66,0.08)]
+           active:scale-[0.98];
+  }
+
+  /* Aurora background — gradient animado muy sutil, simula atardecer tranquilo */
+  .aurora-bg {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .aurora-bg::before,
+  .aurora-bg::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .aurora-bg::before {
+    width: 520px;
+    height: 520px;
+    top: -15%;
+    left: -10%;
+    background: radial-gradient(circle, rgba(168, 197, 214, 0.45), transparent 70%);
+    animation: drift 18s ease-in-out infinite;
+  }
+
+  .aurora-bg::after {
+    width: 460px;
+    height: 460px;
+    bottom: -10%;
+    right: -15%;
+    background: radial-gradient(circle, rgba(235, 186, 155, 0.35), transparent 70%);
+    animation: drift 22s ease-in-out infinite reverse;
+  }
+
+  .aurora-bg > * {
+    position: relative;
+    z-index: 2;
+  }
+
+  /* Línea de respiración ambiental — onda sutil que pulsa a 6 rpm (coherencia cardíaca) */
+  .breath-line {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 120px;
+    pointer-events: none;
+    background: linear-gradient(180deg, transparent 0%, rgba(94, 159, 128, 0.06) 100%);
+    z-index: 1;
+    animation: breathe 10s ease-in-out infinite;
+  }
 }
 
-body {
-  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  font-size: 18px;
-  line-height: 1.6;
-  background-color: #ffffff;
-  color: #1f2937;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-html.dark body {
-  background-color: #1a2332;
-  color: #ffffff;
-}
-
-* {
-  transition-property: background-color, border-color, color, fill, stroke;
-  transition-duration: 300ms;
-}
-
-button {
-  cursor: pointer;
-}
-
-textarea {
-  font-family: inherit;
-}
-
-::selection {
-  background-color: #a8d8ea;
-  color: #1f2937;
+/* Respeta usuarios con sensibilidad a animaciones */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

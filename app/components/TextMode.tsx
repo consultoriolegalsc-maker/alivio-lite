@@ -1,207 +1,222 @@
-"use client";
+'use client';
 
-import { useEffect, useRef, useState } from "react";
-import CrisisBanner from "./CrisisBanner";
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ArrowLeft, Send } from 'lucide-react';
+import CrisisBanner from './CrisisBanner';
+import AlivioMark from './AlivioMark';
 
-type Message = { role: "user" | "assistant"; content: string };
+type Role = 'user' | 'assistant';
+interface Msg {
+  id: string;
+  role: Role;
+  content: string;
+}
 
-type Props = {
-  onBack: () => void;
+interface Props {
+  onExit: () => void;
+}
+
+const SESSION_ID_KEY = 'alivio_session_id';
+
+const GREETING: Msg = {
+  id: 'greeting',
+  role: 'assistant',
+  content:
+    'Hola, soy Alivio. Soy una IA de apoyo emocional, no sustituyo atención profesional ni doy diagnósticos. Estoy aquí para escucharte. ¿Cómo te sientes hoy?',
 };
 
-const HISTORY_KEY = "alivio-chat-history";
+function stripMarkers(text: string): { clean: string; markers: string[] } {
+  const markerPattern = /\[(CRISIS_DETECTADA|MOSTRAR_DIRECTORIO|INICIAR_RESPIRACION:[^\]]+|INICIAR_GROUNDING:[^\]]+|NOTIFICAR_TERAPEUTA_URGENTE|FIN_SESION_RESUMIR)\]/g;
+  const markers = Array.from(text.matchAll(markerPattern), (m) => m[0]);
+  const clean = text.replace(markerPattern, '').trim();
+  return { clean, markers };
+}
 
-export default function TextMode({ onBack }: Props) {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [crisisDetected, setCrisisDetected] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const endRef = useRef<HTMLDivElement | null>(null);
+export default function TextMode({ onExit }: Props) {
+  const [messages, setMessages] = useState<Msg[]>([GREETING]);
+  const [input, setInput] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [crisisVisible, setCrisisVisible] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const sessionIdRef = useRef<string>('');
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(HISTORY_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) setMessages(parsed);
-      }
-    } catch {
-      /* ignore */
+    let sid = typeof window !== 'undefined' ? localStorage.getItem(SESSION_ID_KEY) : null;
+    if (!sid) {
+      sid = crypto.randomUUID();
+      localStorage.setItem(SESSION_ID_KEY, sid);
     }
+    sessionIdRef.current = sid;
   }, []);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(messages));
-    } catch {
-      /* ignore */
-    }
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
 
-  const sendMessage = async () => {
-    const trimmed = input.trim();
-    if (!trimmed || isLoading) return;
-
-    const newMessages: Message[] = [
-      ...messages,
-      { role: "user", content: trimmed },
-    ];
-    setMessages(newMessages);
-    setInput("");
-    setIsLoading(true);
-    setError(null);
+  const sendMessage = useCallback(async () => {
+    if (!input.trim() || isStreaming) return;
+    const userMsg: Msg = { id: crypto.randomUUID(), role: 'user', content: input.trim() };
+    const assistantId = crypto.randomUUID();
+    setMessages((prev) => [...prev, userMsg, { id: assistantId, role: 'assistant', content: '' }]);
+    setInput('');
+    setIsStreaming(true);
 
     try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: newMessages }),
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [...messages, userMsg]
+            .filter((m) => m.id !== 'greeting')
+            .map((m) => ({ role: m.role, content: m.content })),
+          sessionId: sessionIdRef.current,
+          session: {
+            alivioConectado: false,
+            modo: 'texto',
+            zonaHoraria: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          },
+        }),
       });
 
-      const data = await res.json();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      if (!res.ok) {
-        throw new Error(data.error || "Error al contactar el servidor.");
+      const contentType = res.headers.get('Content-Type') ?? '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data.type === 'crisis_fallback') {
+          const { clean } = stripMarkers(data.content);
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, content: clean } : m))
+          );
+          setCrisisVisible(true);
+          return;
+        }
       }
 
-      if (data.crisisDetected) setCrisisDetected(true);
+      if (!res.body) throw new Error('no_stream');
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = '';
 
-      setMessages([
-        ...newMessages,
-        { role: "assistant", content: data.reply },
-      ]);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        accumulated += decoder.decode(value, { stream: true });
+        const { clean, markers } = stripMarkers(accumulated);
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? { ...m, content: clean } : m))
+        );
+        if (markers.includes('[CRISIS_DETECTADA]')) setCrisisVisible(true);
+      }
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Algo salió mal. Intenta de nuevo.";
-      setError(message);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId
+            ? {
+                ...m,
+                content:
+                  'Perdona, tuve un problema técnico. ¿Me cuentas de nuevo en un momento?',
+              }
+            : m
+        )
+      );
     } finally {
-      setIsLoading(false);
+      setIsStreaming(false);
     }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  };
-
-  const clearConversation = () => {
-    if (confirm("¿Seguro que quieres borrar toda la conversación?")) {
-      setMessages([]);
-      setCrisisDetected(false);
-      try {
-        localStorage.removeItem(HISTORY_KEY);
-      } catch {
-        /* ignore */
-      }
-    }
-  };
+  }, [input, isStreaming, messages]);
 
   return (
-    <main className="min-h-screen flex flex-col bg-gradient-to-b from-alivio-gray to-white dark:from-alivio-dark dark:to-slate-900 transition-colors duration-300">
-      <header className="flex items-center justify-between px-4 py-4 border-b border-slate-200 dark:border-white/10">
+    <div className="aurora-bg min-h-[100dvh] flex flex-col bg-warm-bg">
+      <CrisisBanner visible={crisisVisible} onDismiss={() => setCrisisVisible(false)} />
+
+      <header className="flex items-center gap-3 p-4 border-b border-sage-100/60 bg-white/60 backdrop-blur-md">
         <button
-          onClick={onBack}
-          className="text-slate-700 dark:text-white font-medium px-4 py-2 rounded-full hover:bg-white/50 dark:hover:bg-white/10 transition-colors duration-300"
+          onClick={onExit}
+          aria-label="Volver"
+          className="p-2 rounded-full hover:bg-sage-100 transition-colors"
         >
-          ← Volver
+          <ArrowLeft className="w-5 h-5 text-sage-700" />
         </button>
-        <h2 className="text-lg font-light text-slate-800 dark:text-white">
-          Alivio
-        </h2>
-        <button
-          onClick={clearConversation}
-          className="text-slate-700 dark:text-white px-4 py-2 rounded-full hover:bg-white/50 dark:hover:bg-white/10 transition-colors duration-300"
-          aria-label="Borrar conversación"
-        >
-          🗑
-        </button>
+        <AlivioMark size={28} />
+        <span className="font-serif text-lg text-sage-900 -ml-1">Alivio</span>
       </header>
 
-      <section className="flex-1 overflow-y-auto px-4 py-6 max-w-2xl w-full mx-auto">
-        {crisisDetected && <CrisisBanner />}
-
-        {messages.length === 0 && !crisisDetected && (
-          <div className="text-center text-slate-500 dark:text-slate-300 mt-20">
-            <p className="text-lg">Cuéntame qué sientes. Estoy aquí.</p>
-          </div>
-        )}
-
-        <div className="flex flex-col gap-3">
-          {messages.map((m, i) => (
-            <div
-              key={i}
-              className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto px-4 py-6 space-y-4 max-w-2xl w-full mx-auto"
+      >
+        <AnimatePresence initial={false}>
+          {messages.map((m) => (
+            <motion.div
+              key={m.id}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+              className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}
             >
               <div
-                className={
-                  m.role === "user"
-                    ? "max-w-[80%] bg-alivio-sky text-slate-800 rounded-3xl rounded-br-md px-5 py-3 shadow-soft"
-                    : "max-w-[80%] bg-white dark:bg-white/10 text-slate-800 dark:text-white border border-slate-100 dark:border-white/10 rounded-3xl rounded-bl-md px-5 py-3 shadow-soft"
-                }
+                className={`max-w-[85%] px-4 py-3 text-[15px] leading-relaxed shadow-sm ${
+                  m.role === 'user'
+                    ? 'bg-gradient-to-br from-sage-500 to-sage-600 text-white rounded-[20px] rounded-br-md'
+                    : 'bg-white/90 backdrop-blur-sm text-sage-900 border border-sage-100/80 rounded-[20px] rounded-bl-md'
+                }`}
               >
-                <p className="whitespace-pre-wrap leading-relaxed">
-                  {m.content}
-                </p>
+                {m.content || (isStreaming && m.role === 'assistant' ? (
+                  <span className="inline-flex gap-1 py-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-sage-300 animate-pulse" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-sage-300 animate-pulse" style={{ animationDelay: '0.2s' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-sage-300 animate-pulse" style={{ animationDelay: '0.4s' }} />
+                  </span>
+                ) : '')}
               </div>
-            </div>
-          ))}
-
-          {isLoading && (
-            <div className="flex justify-start">
-              <div className="bg-white dark:bg-white/10 text-slate-600 dark:text-slate-200 border border-slate-100 dark:border-white/10 rounded-3xl rounded-bl-md px-5 py-3 shadow-soft flex items-center gap-2">
-                <span className="text-sm">Alivio está escribiendo</span>
-                <span className="flex gap-1">
-                  <span
-                    className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-typing"
-                    style={{ animationDelay: "0s" }}
-                  />
-                  <span
-                    className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-typing"
-                    style={{ animationDelay: "0.2s" }}
-                  />
-                  <span
-                    className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-typing"
-                    style={{ animationDelay: "0.4s" }}
-                  />
+              {m.content && m.id !== 'greeting' && (
+                <span className="text-[10px] text-sage-600/80 tracking-widest uppercase mt-1.5 px-1">
+                  {m.role === 'user' ? 'Tú · Ahora' : 'Alivio · Ahora'}
                 </span>
-              </div>
-            </div>
-          )}
+              )}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
 
-          {error && (
-            <div className="text-center text-red-600 dark:text-red-300 text-sm py-2">
-              {error}
-            </div>
-          )}
-
-          <div ref={endRef} />
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          sendMessage();
+        }}
+        className="pt-3 pb-4 px-4 border-t border-sage-100/60 bg-white/60 backdrop-blur-md"
+      >
+        <div className="max-w-2xl mx-auto space-y-2">
+          <div className="flex gap-3 items-end">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
+              placeholder="Escribe cómo te sientes…"
+              rows={1}
+              disabled={isStreaming}
+              className="flex-1 resize-none rounded-2xl border border-sage-200 bg-white text-sage-900 placeholder:text-sage-500 placeholder:italic px-4 py-3 text-[15px] focus:outline-none focus:ring-2 focus:ring-sage-300 disabled:opacity-50"
+            />
+            <button
+              type="submit"
+              disabled={!input.trim() || isStreaming}
+              aria-label="Enviar"
+              className="w-11 h-11 rounded-full bg-sage-500 hover:bg-sage-600 text-white flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95 shadow-[0_4px_14px_rgba(94,159,128,0.3)]"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </div>
+          <p className="text-[10px] tracking-[0.2em] uppercase text-sage-600/70 text-center">
+            Espacio seguro y anónimo
+          </p>
         </div>
-      </section>
-
-      <footer className="border-t border-slate-200 dark:border-white/10 bg-white/60 dark:bg-black/30 backdrop-blur-sm">
-        <div className="max-w-2xl mx-auto px-4 py-4 flex items-end gap-3">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Escribe lo que sientes…"
-            rows={1}
-            className="flex-1 resize-none px-5 py-4 rounded-3xl bg-white dark:bg-white/10 text-slate-800 dark:text-white border border-slate-200 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-alivio-sky text-lg"
-          />
-          <button
-            onClick={sendMessage}
-            disabled={isLoading || input.trim() === ""}
-            aria-label="Enviar"
-            className="w-14 h-14 rounded-full bg-alivio-sky hover:bg-sky-300 dark:bg-alivio-mint dark:hover:bg-emerald-300 text-slate-800 text-xl shadow-soft disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 flex items-center justify-center"
-          >
-            ➤
-          </button>
-        </div>
-      </footer>
-    </main>
+      </form>
+    </div>
   );
 }
