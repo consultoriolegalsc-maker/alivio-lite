@@ -1,35 +1,64 @@
-"use client";
+'use client';
 
-export default function CrisisBanner() {
+import { motion, AnimatePresence } from 'framer-motion';
+import { Phone, X } from 'lucide-react';
+
+interface Props {
+  visible: boolean;
+  onDismiss?: () => void;
+}
+
+const EMERGENCY_LINES = [
+  { name: 'SAPTEL México', number: '55 5259 8121', note: '24/7 · gratuito · confidencial' },
+  { name: 'Línea de la Vida', number: '800 290 0024', note: '24/7' },
+  { name: 'Emergencias', number: '911', note: 'Para peligro inmediato' },
+];
+
+export default function CrisisBanner({ visible, onDismiss }: Props) {
   return (
-    <div
-      role="alert"
-      className="rounded-3xl p-6 mb-4 bg-[#FFE5E5] dark:bg-[#3a2a2a] shadow-soft transition-colors duration-300"
-    >
-      <h3 className="text-xl font-medium text-slate-800 dark:text-white mb-2">
-        Lo que sientes importa
-      </h3>
-      <p className="text-slate-700 dark:text-slate-200 mb-4 leading-relaxed">
-        No estás sola/solo. Por favor, considera hablar ahora con alguien que
-        pueda ayudarte.
-      </p>
-      <div className="flex flex-col gap-3">
-        <a
-          href="tel:5552598121"
-          className="block w-full text-center bg-white dark:bg-alivio-dark text-slate-800 dark:text-white font-medium py-4 px-6 rounded-3xl shadow-soft hover:opacity-90 transition-all duration-300"
+    <AnimatePresence>
+      {visible && (
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -20 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          className="sticky top-0 z-50 bg-rose-50 border-b border-rose-200 px-4 py-4 shadow-sm"
+          role="alert"
+          aria-live="assertive"
         >
-          📞 Llamar a SAPTEL
-        </a>
-        <a
-          href="tel:8002900024"
-          className="block w-full text-center bg-white/70 dark:bg-white/10 text-slate-800 dark:text-white font-medium py-3 px-6 rounded-3xl hover:opacity-90 transition-all duration-300"
-        >
-          Línea de la Vida
-        </a>
-      </div>
-      <p className="text-sm text-slate-600 dark:text-slate-300 mt-4 text-center">
-        Si estás en peligro inmediato, llama al 911.
-      </p>
-    </div>
+          <div className="max-w-2xl mx-auto flex items-start gap-3">
+            <Phone className="w-5 h-5 text-rose-600 shrink-0 mt-1" strokeWidth={2} />
+            <div className="flex-1 space-y-2">
+              <p className="font-medium text-rose-900 text-sm">
+                Si estás en peligro, por favor llama ahora:
+              </p>
+              <ul className="space-y-1.5">
+                {EMERGENCY_LINES.map((line) => (
+                  <li key={line.number} className="text-sm">
+                    <a
+                      href={`tel:${line.number.replace(/\s/g, '')}`}
+                      className="inline-flex items-center gap-2 text-rose-800 hover:text-rose-900 font-medium underline underline-offset-2"
+                    >
+                      {line.name}: {line.number}
+                    </a>
+                    <span className="text-rose-700 ml-2 text-xs">{line.note}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            {onDismiss && (
+              <button
+                onClick={onDismiss}
+                aria-label="Cerrar aviso"
+                className="text-rose-600 hover:text-rose-800 p-1 rounded-md hover:bg-rose-100 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

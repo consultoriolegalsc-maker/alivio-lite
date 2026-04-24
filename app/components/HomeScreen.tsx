@@ -1,83 +1,93 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
+import { motion } from 'framer-motion';
+import { Mic, MessageCircle } from 'lucide-react';
+import AlivioMark from './AlivioMark';
 
-type Mode = "home" | "voice" | "text";
+interface Props {
+  onSelectText: () => void;
+  onSelectVoice: () => void;
+}
 
-type Props = {
-  onNavigate: (mode: Mode) => void;
-};
-
-const THEME_KEY = "alivio-theme";
-
-export default function HomeScreen({ onNavigate }: Props) {
-  const [isDark, setIsDark] = useState(false);
-
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(THEME_KEY);
-      const prefersDark = window.matchMedia(
-        "(prefers-color-scheme: dark)"
-      ).matches;
-      const shouldDark = stored ? stored === "dark" : prefersDark;
-      setIsDark(shouldDark);
-      document.documentElement.classList.toggle("dark", shouldDark);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  const toggleTheme = () => {
-    const next = !isDark;
-    setIsDark(next);
-    try {
-      localStorage.setItem(THEME_KEY, next ? "dark" : "light");
-    } catch {
-      /* ignore */
-    }
-    document.documentElement.classList.toggle("dark", next);
-  };
-
+export default function HomeScreen({ onSelectText, onSelectVoice }: Props) {
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center px-6 py-10 bg-gradient-to-b from-alivio-sky via-white to-alivio-mint dark:from-alivio-dark dark:via-slate-900 dark:to-slate-800 transition-colors duration-300">
-      <button
-        onClick={toggleTheme}
-        aria-label="Cambiar tema"
-        className="fixed top-6 right-6 w-12 h-12 rounded-full bg-white/80 dark:bg-white/10 backdrop-blur-sm shadow-soft flex items-center justify-center text-xl hover:scale-105 transition-transform duration-300"
+    <main className="aurora-bg min-h-[100dvh] flex flex-col items-center justify-center p-6 bg-warm-bg">
+      <div className="breath-line" aria-hidden />
+
+      <motion.div
+        initial={{ opacity: 0, y: 16, filter: 'blur(4px)' }}
+        animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+        transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
+        className="max-w-md w-full space-y-14 text-center"
       >
-        {isDark ? "☀️" : "🌙"}
-      </button>
+        <div className="flex flex-col items-center space-y-5">
+          <AlivioMark size={72} />
 
-      <div className="flex-1 flex flex-col items-center justify-center text-center max-w-md w-full">
-        <h1
-          className="text-7xl md:text-8xl font-light text-slate-800 dark:text-white mb-4"
-          style={{ letterSpacing: "0.15em" }}
-        >
-          Alivio
-        </h1>
-        <p className="text-lg md:text-xl text-slate-600 dark:text-slate-200 mb-12">
-          Estoy aquí para escucharte.
-        </p>
-
-        <div className="w-full flex flex-col gap-4">
-          <button
-            onClick={() => onNavigate("voice")}
-            className="w-full bg-white dark:bg-white/10 text-slate-800 dark:text-white text-xl font-medium py-6 px-6 rounded-3xl shadow-soft hover:scale-[1.02] transition-transform duration-300"
-          >
-            🎙️ Hablar
-          </button>
-          <button
-            onClick={() => onNavigate("text")}
-            className="w-full bg-white dark:bg-white/10 text-slate-800 dark:text-white text-xl font-medium py-6 px-6 rounded-3xl shadow-soft hover:scale-[1.02] transition-transform duration-300"
-          >
-            💬 Escribir
-          </button>
+          <div className="space-y-2">
+            <h1 className="text-6xl font-serif text-sage-900 tracking-tight leading-none">
+              Alivio
+            </h1>
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.4, duration: 0.8 }}
+              className="text-sage-700 text-[15px] leading-relaxed italic font-serif"
+            >
+              Toma aire. Estoy aquí.
+            </motion.p>
+          </div>
         </div>
-      </div>
 
-      <p className="text-sm text-slate-600 dark:text-slate-300 mt-10">
-        Gratis • Anónimo • 24/7
-      </p>
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5, duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+          className="space-y-3"
+        >
+          <motion.button
+            whileHover={{ y: -2 }}
+            whileTap={{ scale: 0.98 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+            onClick={onSelectVoice}
+            className="w-full btn-primary-soft flex items-center justify-center gap-3 text-lg"
+          >
+            <Mic className="w-5 h-5" strokeWidth={2} />
+            Hablar
+          </motion.button>
+
+          <motion.button
+            whileHover={{ y: -2 }}
+            whileTap={{ scale: 0.98 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+            onClick={onSelectText}
+            className="w-full btn-secondary-soft flex items-center justify-center gap-3 text-lg"
+          >
+            <MessageCircle className="w-5 h-5" strokeWidth={2} />
+            Escribir
+          </motion.button>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1.1, duration: 0.8 }}
+          className="space-y-3"
+        >
+          <p className="text-[10px] text-sage-700/90 tracking-[0.18em] uppercase leading-relaxed">
+            IA de apoyo emocional — no sustituye atención profesional
+          </p>
+          <div className="flex items-center justify-center gap-5 text-[10px] tracking-[0.18em] uppercase text-sage-600/70">
+            <a href="#" className="hover:text-sage-800 transition-colors">Privacidad</a>
+            <span aria-hidden className="w-[3px] h-[3px] rounded-full bg-sage-400/60" />
+            <a href="#" className="hover:text-sage-800 transition-colors">Términos</a>
+            <span aria-hidden className="w-[3px] h-[3px] rounded-full bg-sage-400/60" />
+            <a href="#" className="hover:text-sage-800 transition-colors">Contacto</a>
+          </div>
+          <p className="text-[10px] tracking-[0.18em] uppercase text-sage-600/60">
+            © Alivio · No es un servicio médico
+          </p>
+        </motion.div>
+      </motion.div>
     </main>
   );
 }

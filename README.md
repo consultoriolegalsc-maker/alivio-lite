@@ -1,72 +1,82 @@
-# Alivio Lite
+# Alivio
 
-Compañero de apoyo emocional con IA, en español neutro latino. Gratis, anónimo y disponible 24/7.
+Compañero de apoyo emocional con IA en español neutro latino. Gratis, anónimo, 24/7.
 
-## ¿Qué es Alivio Lite?
+> **Aviso:** Alivio no es servicio médico ni sustituye atención profesional.
 
-Alivio Lite es una aplicación web que ofrece un espacio cálido para expresar cómo te sientes. Puedes hablar o escribir, y Alivio (una IA basada en Claude) te acompaña con validación, preguntas abiertas y técnicas breves de respiración o grounding. **No es un servicio médico ni sustituye a un profesional de la salud mental.**
+## Stack
 
-## Cómo conseguir tu API Key de Anthropic
+- Next.js 14 (App Router) + TypeScript + Tailwind CSS
+- Anthropic Claude API (Haiku 4.5 por default, con prompt caching)
+- Web Speech API (voz, modo texto siempre disponible)
+- Framer Motion (animaciones con spring physics)
+- PWA instalable en móvil y desktop
+- Rate limiting en memoria (migrar a Upstash/Vercel KV en prod)
 
-1. Entra a https://console.anthropic.com
-2. Inicia sesión o crea una cuenta
-3. Ve a **API Keys** en el menú lateral
-4. Haz clic en **Create Key**, ponle un nombre (por ejemplo "alivio-lite") y cópiala
-5. Abre el archivo `.env.local` en este proyecto
-6. Reemplaza `sk-ant-api03-pega-tu-key-aqui` por tu clave real
-7. Guarda el archivo
+## Estructura
 
-> Importante: **nunca compartas tu API Key** ni la subas a GitHub. El archivo `.env.local` ya está en `.gitignore`.
+```
+alivio/
+├── app/
+│   ├── layout.tsx, page.tsx, globals.css
+│   ├── components/
+│   │   ├── HomeScreen.tsx      # Pantalla de inicio (Hablar / Escribir)
+│   │   ├── TextMode.tsx        # Chat por texto con streaming
+│   │   ├── VoiceMode.tsx       # Chat por voz (Web Speech API)
+│   │   ├── Disclaimer.tsx      # Aviso legal bloqueante (primer uso)
+│   │   └── CrisisBanner.tsx    # Banner con líneas de emergencia
+│   └── api/chat/route.ts       # Endpoint Claude + caching + crisis fallback
+├── lib/
+│   ├── alivio-system-prompt.ts # System prompt v3 base + contexto dinámico
+│   ├── crisis-detector.ts      # Clasificador regex independiente del LLM
+│   └── rate-limit.ts           # Techo duro de costo (30 msgs/día default)
+├── prompts/
+│   └── system-prompt-alivio.md # Documentación canónica del prompt v3
+├── public/
+│   └── manifest.json           # PWA manifest
+└── .env.example                # Variables requeridas
+```
 
-## Comandos para correr
+## Correr local
 
 ```bash
 npm install
+cp .env.example .env.local
+# editar .env.local y pegar ANTHROPIC_API_KEY real
+
 npm run dev
 ```
 
-Abre http://localhost:3000 en tu navegador (preferiblemente Chrome para modo voz).
+Abrir [http://localhost:3000](http://localhost:3000). Para modo voz, usar Chrome, Edge o Brave.
 
-## Troubleshooting
+## Seguridad y ética
 
-**"Falta la ANTHROPIC_API_KEY"**
-Edita `.env.local`, pon tu clave real y reinicia el servidor con `Ctrl+C` y `npm run dev`.
+- **Detector de crisis independiente del LLM** — si Claude falla, el mensaje de emergencia se muestra igual
+- **Rate limit por sesión** — 30 mensajes/día por default, protege contra abuso de API key
+- **Sin logs de contenido** — solo metadata (timestamps, categorías de crisis, sessionId)
+- **Disclaimer bloqueante al primer uso** — checkbox obligatorio
+- **Banner de emergencia siempre visible** cuando se detecta crisis
+- **Headers de seguridad** (CSP, X-Frame-Options, Permissions-Policy)
 
-**Modo voz no funciona**
-La Web Speech API solo funciona en navegadores basados en Chromium (Chrome, Edge, Brave). Safari y Firefox tienen soporte parcial o nulo. Usa el modo texto como alternativa.
+## Claude API
 
-**Error 500 al enviar un mensaje**
-Revisa la consola del servidor (donde corriste `npm run dev`). Suele ser API Key inválida, sin saldo en Anthropic, o problemas de red.
+- Modelo default: `claude-haiku-4-5-20251001` (~$0.03 por conversación con caching)
+- Prompt caching activo sobre `ALIVIO_SYSTEM_PROMPT_BASE` (-90% costo en turnos 2+)
+- Max tokens: 600 (texto) / 300 (voz)
+- Si quieres más calidad, cambia `ANTHROPIC_MODEL=claude-sonnet-4-6` en `.env.local`
 
-**No escucho la voz de Alivio**
-Algunos sistemas no tienen voces en español instaladas. En Windows puedes añadirlas desde **Configuración → Hora e idioma → Voz**. En Mac desde **Preferencias del sistema → Accesibilidad → Contenido hablado**.
+## Próximas iteraciones
 
-**Los estilos no cargan**
-Asegúrate de haber corrido `npm install` completo. Si siguen sin cargar, borra la carpeta `.next` y corre `npm run dev` de nuevo.
+- [ ] Cloudflare Turnstile (anti-bot) en `/api/chat`
+- [ ] Migrar Web Speech API a ElevenLabs para voz cálida natural
+- [ ] Supabase: tabla `profesionales` + RLS
+- [ ] Cal.com embebido + Stripe Connect para agendamiento
+- [ ] Pantalla de directorio al marcador `[MOSTRAR_DIRECTORIO]`
+- [ ] n8n workflow "Agente Alivio" con RAG + tool use
+- [ ] Dashboard para terapeutas (Alivio Conectado)
+- [ ] Resúmenes pre-sesión generados por Haiku batch
+- [ ] Migrar rate-limit en memoria a Vercel KV
 
-## Mejoras futuras
+## Contacto
 
-- Integrar ElevenLabs para voz más cálida y natural
-- Historial de sesiones con resúmenes automáticos
-- Ejercicios de respiración con animación visual guiada
-- Modo journaling con entradas privadas
-- Check-ins diarios con notificaciones
-- Exportar conversación para compartir con profesional
-- Versión React Native móvil
-- Multi-idioma (portugués, inglés)
-
-## Aviso legal
-
-**Alivio Lite NO es un servicio médico ni sustituye atención profesional.** Si estás en crisis, por favor busca ayuda inmediata:
-
-- **SAPTEL México**: 55 5259 8121
-- **Línea de la Vida**: 800 290 0024
-- **Emergencias**: 911
-
-## Stack técnico
-
-- Next.js 14 (App Router) + TypeScript
-- Tailwind CSS
-- Anthropic Claude API (`claude-sonnet-4-5`)
-- Web Speech API del navegador
-- localStorage para historial
+Jorge Delfin · Erik Alvarado · Alivio 2026

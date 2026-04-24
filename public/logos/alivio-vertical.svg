@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 700" width="600" height="700" role="img" aria-label="Alivio — apoyo emocional con IA">
+  <defs>
+    <linearGradient id="dropG" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#9EC3A8"/>
+      <stop offset="55%" stop-color="#7FB89E"/>
+      <stop offset="100%" stop-color="#4A8168"/>
+    </linearGradient>
+    <radialGradient id="haloG" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#7FB89E" stop-opacity="0.35"/>
+      <stop offset="60%" stop-color="#7FB89E" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#7FB89E" stop-opacity="0"/>
+    </radialGradient>
+    <style type="text/css"><![CDATA[
+      @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@1,144,400&family=Inter:wght@500&display=swap');
+      .alivio-word { font-family: 'Fraunces', 'Newsreader', Georgia, serif; font-style: italic; font-weight: 400; font-size: 130px; fill: #2B443A; letter-spacing: -3px; text-anchor: middle; }
+      .alivio-tag  { font-family: 'Inter', 'Helvetica Neue', sans-serif; font-weight: 500; font-size: 20px; fill: #4A8168; letter-spacing: 7px; text-anchor: middle; text-transform: uppercase; }
+    ]]></style>
+  </defs>
+  <rect width="600" height="700" fill="#FAF8F4"/>
+  <!-- halo -->
+  <circle cx="300" cy="220" r="180" fill="url(#haloG)"/>
+  <!-- gota -->
+  <path d="M 300,80 C 220,170 190,240 190,275 C 190,325 240,360 300,360 C 360,360 410,325 410,275 C 410,240 380,170 300,80 Z" fill="url(#dropG)"/>
+  <!-- texto principal -->
+  <text x="300" y="490" class="alivio-word">Alivio</text>
+  <!-- tagline -->
+  <text x="300" y="560" class="alivio-tag">Apoyo emocional con IA</text>
+</svg>
